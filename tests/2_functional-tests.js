@@ -1,279 +1,254 @@
-const http = require('http');
-const assert = require('assert');
+/*
+ *
+ *       FILL IN EACH FUNCTIONAL TEST BELOW COMPLETELY
+ *       -----[Keep the tests in the same order!]-----
+ *
+ */
 
-// Helper function to make HTTP requests
-function makeRequest(method, path, data = null) {
-  return new Promise((resolve, reject) => {
-    const options = {
-      hostname: 'localhost',
-      port: 3000,
-      path: path,
-      method: method,
-      headers: {
-        'Content-Type': 'application/x-www-form-urlencoded'
-      }
-    };
+const chaiHttp = require("chai-http");
+const chai = require("chai");
+const assert = chai.assert;
+const server = require("../server");
 
-    const req = http.request(options, (res) => {
-      let body = '';
+chai.use(chaiHttp);
 
-      res.on('data', (chunk) => {
-        body += chunk.toString();
-      });
+suite("Functional Tests", function () {
+  // Clear database before tests
+  this.timeout(5000);
 
-      res.on('end', () => {
-        resolve({
-          statusCode: res.statusCode,
-          body: body,
-          headers: res.headers
+  suite("Routing tests", function () {
+    suite(
+      "POST /api/books with title => create book object/expect book object",
+      function () {
+        test("Test POST /api/books with title", function (done) {
+          chai
+            .request(server)
+            .post("/api/books")
+            .type("form")
+            .send({
+              title: "Test Book",
+            })
+            .end(function (err, res) {
+              assert.equal(res.status, 200);
+              assert.isObject(res.body, "response should be an object");
+              assert.property(res.body, "title", "Book should contain title");
+              assert.property(res.body, "_id", "Book should contain _id");
+              assert.equal(res.body.title, "Test Book");
+              done();
+            });
         });
+
+        test("Test POST /api/books with no title given", function (done) {
+          chai
+            .request(server)
+            .post("/api/books")
+            .type("form")
+            .send({})
+            .end(function (err, res) {
+              assert.equal(res.status, 200);
+              assert.equal(res.text, "missing required field title");
+              done();
+            });
+        });
+      }
+    );
+
+    suite("GET /api/books => array of books", function () {
+      test("Test GET /api/books", function (done) {
+        chai
+          .request(server)
+          .get("/api/books")
+          .end(function (err, res) {
+            assert.equal(res.status, 200);
+            assert.isArray(res.body, "response should be an array");
+            if (res.body.length > 0) {
+              assert.property(
+                res.body[0],
+                "commentcount",
+                "Books in array should contain commentcount"
+              );
+              assert.property(
+                res.body[0],
+                "title",
+                "Books in array should contain title"
+              );
+              assert.property(
+                res.body[0],
+                "_id",
+                "Books in array should contain _id"
+              );
+            }
+            done();
+          });
       });
     });
 
-    req.on('error', (error) => {
-      reject(error);
+    suite("GET /api/books/[id] => book object with [id]", function () {
+      test("Test GET /api/books/[id] with id not in db", function (done) {
+        chai
+          .request(server)
+          .get("/api/books/invalidid123456")
+          .end(function (err, res) {
+            assert.equal(res.status, 200);
+            assert.equal(res.text, "no book exists");
+            done();
+          });
+      });
+
+      test("Test GET /api/books/[id] with valid id in db", function (done) {
+        chai
+          .request(server)
+          .post("/api/books")
+          .type("form")
+          .send({
+            title: "Test Book for GET",
+          })
+          .end(function (err, res) {
+            const bookId = res.body._id;
+
+            chai
+              .request(server)
+              .get("/api/books/" + bookId)
+              .end(function (err, res) {
+                assert.equal(res.status, 200);
+                assert.isObject(res.body, "response should be an object");
+                assert.property(res.body, "title", "Book should contain title");
+                assert.property(res.body, "_id", "Book should contain _id");
+                assert.property(
+                  res.body,
+                  "comments",
+                  "Book should contain comments"
+                );
+                assert.isArray(
+                  res.body.comments,
+                  "comments should be an array"
+                );
+                assert.equal(res.body._id, bookId);
+                done();
+              });
+          });
+      });
     });
 
-    if (data) {
-      req.write(data);
-    }
+    suite(
+      "POST /api/books/[id] => add comment/expect book object with id",
+      function () {
+        test("Test POST /api/books/[id] with comment", function (done) {
+          chai
+            .request(server)
+            .post("/api/books")
+            .type("form")
+            .send({
+              title: "Test Book for Comment",
+            })
+            .end(function (err, res) {
+              const bookId = res.body._id;
 
-    req.end();
-  });
-}
+              chai
+                .request(server)
+                .post("/api/books/" + bookId)
+                .type("form")
+                .send({
+                  comment: "This is a test comment",
+                })
+                .end(function (err, res) {
+                  assert.equal(res.status, 200);
+                  assert.isObject(res.body, "response should be an object");
+                  assert.property(
+                    res.body,
+                    "title",
+                    "Book should contain title"
+                  );
+                  assert.property(res.body, "_id", "Book should contain _id");
+                  assert.property(
+                    res.body,
+                    "comments",
+                    "Book should contain comments"
+                  );
+                  assert.isArray(
+                    res.body.comments,
+                    "comments should be an array"
+                  );
+                  assert.include(res.body.comments, "This is a test comment");
+                  done();
+                });
+            });
+        });
 
-// Test suite
-const tests = [
-  {
-    name: 'Test 1: Create a book with title',
-    async run() {
-      const response = await makeRequest('POST', '/api/books', 'title=Test Book 1');
-      const book = JSON.parse(response.body);
-      
-      assert(book.title === 'Test Book 1', 'Book title should match');
-      assert(book._id, 'Book should have an _id');
-      
-      // Save for later tests
-      global.testBookId = book._id;
-      
-      console.log('✓ Test 1 passed: Book created successfully');
-      return true;
-    }
-  },
-  
-  {
-    name: 'Test 2: Create a book without title (should fail)',
-    async run() {
-      const response = await makeRequest('POST', '/api/books', '');
-      
-      assert(response.body === 'missing required field title', 
-        'Should return "missing required field title"');
-      
-      console.log('✓ Test 2 passed: Missing title validation works');
-      return true;
-    }
-  },
-  
-  {
-    name: 'Test 3: Get all books',
-    async run() {
-      const response = await makeRequest('GET', '/api/books');
-      const books = JSON.parse(response.body);
-      
-      assert(Array.isArray(books), 'Response should be an array');
-      assert(books.length > 0, 'Should have at least one book');
-      assert(books[0].title, 'Book should have title');
-      assert(books[0]._id, 'Book should have _id');
-      assert(books[0].hasOwnProperty('commentcount'), 'Book should have commentcount');
-      
-      console.log('✓ Test 3 passed: Get all books works');
-      return true;
-    }
-  },
-  
-  {
-    name: 'Test 4: Get a single book with valid id',
-    async run() {
-      const response = await makeRequest('GET', `/api/books/${global.testBookId}`);
-      const book = JSON.parse(response.body);
-      
-      assert(book.title, 'Book should have title');
-      assert(book._id === global.testBookId, 'Book _id should match');
-      assert(Array.isArray(book.comments), 'Book should have comments array');
-      
-      console.log('✓ Test 4 passed: Get single book works');
-      return true;
-    }
-  },
-  
-  {
-    name: 'Test 5: Get a single book with invalid id',
-    async run() {
-      const response = await makeRequest('GET', '/api/books/invalid_id_12345');
-      
-      assert(response.body === 'no book exists', 
-        'Should return "no book exists"');
-      
-      console.log('✓ Test 5 passed: Invalid book id handled correctly');
-      return true;
-    }
-  },
-  
-  {
-    name: 'Test 6: Add a comment to a book',
-    async run() {
-      const response = await makeRequest('POST', 
-        `/api/books/${global.testBookId}`, 
-        'comment=This is a test comment');
-      const book = JSON.parse(response.body);
-      
-      assert(book.title, 'Book should have title');
-      assert(book._id === global.testBookId, 'Book _id should match');
-      assert(Array.isArray(book.comments), 'Book should have comments array');
-      assert(book.comments.length > 0, 'Book should have at least one comment');
-      assert(book.comments.includes('This is a test comment'), 
-        'Comment should be in the comments array');
-      
-      console.log('✓ Test 6 passed: Add comment works');
-      return true;
-    }
-  },
-  
-  {
-    name: 'Test 7: Add a comment without comment field',
-    async run() {
-      const response = await makeRequest('POST', 
-        `/api/books/${global.testBookId}`, 
-        '');
-      
-      assert(response.body === 'missing required field comment', 
-        'Should return "missing required field comment"');
-      
-      console.log('✓ Test 7 passed: Missing comment validation works');
-      return true;
-    }
-  },
-  
-  {
-    name: 'Test 8: Add a comment to a book with invalid id',
-    async run() {
-      const response = await makeRequest('POST', 
-        '/api/books/invalid_id_12345', 
-        'comment=Test comment');
-      
-      assert(response.body === 'no book exists', 
-        'Should return "no book exists"');
-      
-      console.log('✓ Test 8 passed: Comment on invalid book handled correctly');
-      return true;
-    }
-  },
-  
-  {
-    name: 'Test 9: Delete a book',
-    async run() {
-      // Create a book to delete
-      const createResponse = await makeRequest('POST', '/api/books', 
-        'title=Book to Delete');
-      const bookToDelete = JSON.parse(createResponse.body);
-      
-      // Delete the book
-      const deleteResponse = await makeRequest('DELETE', 
-        `/api/books/${bookToDelete._id}`);
-      
-      assert(deleteResponse.body === 'delete successful', 
-        'Should return "delete successful"');
-      
-      // Verify book is deleted
-      const getResponse = await makeRequest('GET', 
-        `/api/books/${bookToDelete._id}`);
-      assert(getResponse.body === 'no book exists', 
-        'Deleted book should not exist');
-      
-      console.log('✓ Test 9 passed: Delete book works');
-      return true;
-    }
-  },
-  
-  {
-    name: 'Test 10: Delete all books',
-    async run() {
-      // Add a couple of books
-      await makeRequest('POST', '/api/books', 'title=Book A');
-      await makeRequest('POST', '/api/books', 'title=Book B');
-      
-      // Delete all books
-      const deleteResponse = await makeRequest('DELETE', '/api/books');
-      
-      assert(deleteResponse.body === 'complete delete successful', 
-        'Should return "complete delete successful"');
-      
-      // Verify all books are deleted
-      const getAllResponse = await makeRequest('GET', '/api/books');
-      const books = JSON.parse(getAllResponse.body);
-      assert(books.length === 0, 'Should have no books');
-      
-      console.log('✓ Test 10 passed: Delete all books works');
-      return true;
-    }
-  }
-];
+        test("Test POST /api/books/[id] without comment field", function (done) {
+          chai
+            .request(server)
+            .post("/api/books")
+            .type("form")
+            .send({
+              title: "Test Book for No Comment",
+            })
+            .end(function (err, res) {
+              const bookId = res.body._id;
 
-// Run all tests
-async function runTests() {
-  console.log('\n=================================');
-  console.log('Running Functional Tests');
-  console.log('=================================\n');
-  
-  let passed = 0;
-  let failed = 0;
-  
-  for (let i = 0; i < tests.length; i++) {
-    const test = tests[i];
-    try {
-      console.log(`Running ${test.name}...`);
-      await test.run();
-      passed++;
-    } catch (error) {
-      console.log(`✗ ${test.name} failed:`);
-      console.log(`  Error: ${error.message}`);
-      failed++;
-    }
-    console.log('');
-  }
-  
-  console.log('=================================');
-  console.log(`Tests Passed: ${passed}/${tests.length}`);
-  console.log(`Tests Failed: ${failed}/${tests.length}`);
-  console.log('=================================\n');
-  
-  // Exit with appropriate code
-  process.exit(failed > 0 ? 1 : 0);
-}
+              chai
+                .request(server)
+                .post("/api/books/" + bookId)
+                .type("form")
+                .send({})
+                .end(function (err, res) {
+                  assert.equal(res.status, 200);
+                  assert.equal(res.text, "missing required field comment");
+                  done();
+                });
+            });
+        });
 
-// Wait for server to be ready, then run tests
-function waitForServer(callback, maxAttempts = 10) {
-  let attempts = 0;
-  
-  const checkServer = () => {
-    attempts++;
-    
-    http.get('http://localhost:3000/', (res) => {
-      console.log('Server is ready!\n');
-      callback();
-    }).on('error', (err) => {
-      if (attempts >= maxAttempts) {
-        console.error('Server failed to start after', maxAttempts, 'attempts');
-        process.exit(1);
-      } else {
-        console.log(`Waiting for server... (attempt ${attempts}/${maxAttempts})`);
-        setTimeout(checkServer, 1000);
+        test("Test POST /api/books/[id] with comment, id not in db", function (done) {
+          chai
+            .request(server)
+            .post("/api/books/invalidid123456")
+            .type("form")
+            .send({
+              comment: "Test comment",
+            })
+            .end(function (err, res) {
+              assert.equal(res.status, 200);
+              assert.equal(res.text, "no book exists");
+              done();
+            });
+        });
       }
-    });
-  };
-  
-  checkServer();
-}
+    );
 
-// Export for use in test runner
-module.exports = { runTests, waitForServer };
+    suite("DELETE /api/books/[id] => delete book object id", function () {
+      test("Test DELETE /api/books/[id] with valid id in db", function (done) {
+        chai
+          .request(server)
+          .post("/api/books")
+          .type("form")
+          .send({
+            title: "Test Book for Delete",
+          })
+          .end(function (err, res) {
+            const bookId = res.body._id;
+
+            chai
+              .request(server)
+              .delete("/api/books/" + bookId)
+              .end(function (err, res) {
+                assert.equal(res.status, 200);
+                assert.equal(res.text, "delete successful");
+                done();
+              });
+          });
+      });
+
+      test("Test DELETE /api/books/[id] with id not in db", function (done) {
+        chai
+          .request(server)
+          .delete("/api/books/invalidid123456")
+          .end(function (err, res) {
+            assert.equal(res.status, 200);
+            assert.equal(res.text, "no book exists");
+            done();
+          });
+      });
+    });
+  });
+});
